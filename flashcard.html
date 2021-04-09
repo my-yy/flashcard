@@ -216,11 +216,12 @@
           return
         }
 
-        //创建新的条目，规定下次复习日期为1天后
+        //创建新的条目
         const item = {
           "front": this.new_front,
           "back": this.new_back,
           "history": [],
+          //为方便演示，将next_rev_at设置为当前时刻,last_rev_at设置为昨天
           "last_rev_at": new Date().getTime() - ONE_DAY_MS,
           "next_rev_at": new Date().getTime()
         }
@@ -233,8 +234,9 @@
 
         this.$notify({type: 'success', message: '添加成功'});
 
-        //添加到今日复习：
-        this.rev_list.push(item)
+        if (item.next_rev_at <= new Date().getTime()) {
+          this.rev_list.push(item)
+        }
 
         //清空输入内容
         this.new_front = null
