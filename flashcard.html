@@ -1,0 +1,297 @@
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+
+  <!-- 腾讯云Cloudbase-->
+  <script src="https://imgcache.qq.com/qcloud/tcbjs/1.3.5/tcb.js"></script>
+
+  <!--  Vue -->
+  <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.min.js"></script>
+
+  <!-- VantUI  -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vant@2.9/lib/index.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/vant@2.9/lib/vant.min.js"></script>
+
+  <!--  Axios-->
+  <script src="https://cdn.bootcdn.net/ajax/libs/axios/0.19.2/axios.min.js"></script>
+
+  <!--  MomentJS-->
+  <script src="https://cdn.bootcdn.net/ajax/libs/moment.js/2.27.0/moment.min.js"></script>
+  <title>复习软件</title>
+  <style>
+    #app {
+      text-align: center;
+      margin: 4em;
+    }
+
+    .van-tabs__content {
+      padding: 1em;
+    }
+
+    .mark_btn_wrapper {
+      margin: 1em;
+      display: flex;
+      justify-content: space-around;
+    }
+
+    .mark_btn_wrapper > .van-button {
+      width: 8em;
+    }
+
+    .save_btn {
+      margin: 1em;
+      width: 10em;
+    }
+
+    .card_item {
+      text-align: left;
+      border-top: 1px lightgray solid;
+      padding: 10px;
+    }
+
+    .card_item:last-child {
+      border-bottom: 1px lightgray solid;
+    }
+
+    .card_item > div.back {
+      color: gray;
+    }
+
+    .card_item_back {
+      color: gray;
+    }
+
+
+    .desc {
+      font-size: small;
+      color: gray;
+    }
+
+
+    .rev_panel .card_front {
+      height: 5em;
+      line-height: 5em;
+      font-size: 1.5em;
+      border: 1px lightgray dashed;
+    }
+
+    .rev_panel .card_back {
+      margin-top: 10px;
+      border: 1px lightgray dashed;
+      height: 5em;
+      line-height: 5em;
+      font-size: 1.5em;
+      vertical-align: center;
+    }
+
+
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <div v-show="!is_loaded" class="app_loading">loading...</div>
+  <van-tabs type="card" v-model:active="activeTab" v-show="is_loaded">
+
+    <van-tab name="tab1" title="新增卡片">
+      <van-cell-group>
+        <van-field v-model="new_front" label="正面" type="textarea" placeholder="请输入卡片正面"
+                   :autosize="{ maxHeight: 100, minHeight: 50 }"/>
+      </van-cell-group>
+      <van-cell-group>
+        <van-field v-model="new_back" label="背面" type="textarea" placeholder="请输入卡片背面"
+                   :autosize="{ maxHeight: 100, minHeight: 50 }"/>
+      </van-cell-group>
+      <van-button class="save_btn" type="primary" @click="addNewCard" :loading="is_saving">保存</van-button>
+    </van-tab>
+
+    <van-tab name="tab2" :title="todayRevTabName">
+      <div v-if="rev_list.length===0">
+        今日无需复习
+      </div>
+      <div v-else class="rev_panel">
+        <div class="card_front">
+          <span>{{rev_list[0].front}}</span>
+        </div>
+        <div class="card_back">
+          {{isAnswerShowing ? rev_list[0].back : ""}}
+        </div>
+        <div v-show="!isAnswerShowing" class="mark_btn_wrapper">
+          <van-button plain type="info" @click="isAnswerShowing=true">显示答案</van-button>
+        </div>
+        <div v-show="isAnswerShowing" class="mark_btn_wrapper">
+          <van-button :loading="is_updating" type="warning" @click="onMark(0.3)">忘记</van-button>
+          <van-button :loading="is_updating" type="default" @click="onMark(0.6)">记得</van-button>
+          <van-button :loading="is_updating" type="primary" @click="onMark(0.8)">熟悉</van-button>
+        </div>
+      </div>
+    </van-tab>
+
+    <van-tab name="tab3" :title="allCardsTabName">
+      <div v-for="i in all_items" :key="i._id" class="card_item">
+        <div>{{i.front}}</div>
+        <div class="card_item_back">{{i.back}}</div>
+        <div class="desc">
+          上次复习日期：{{formatYMDHMS(i.last_rev_at)}}，
+          下次复习日期:{{formatYMDHMS(i.next_rev_at)}}
+        </div>
+      </div>
+    </van-tab>
+  </van-tabs>
+
+</div>
+<script>
+
+
+  const ONE_DAY_MS = 3600 * 24 * 1000
+
+  new Vue({
+    el: '#app',
+    data: {
+      is_loaded: false,//是否完成初始化
+
+      //目前展示的Tab
+      activeTab: "tab2",
+
+
+      //新建卡片：
+      new_front: "", //卡片正面内容
+      new_back: "",//卡片背面内容
+      is_saving: false,//是否正在保存
+
+
+      //今日复习:
+      rev_list: [], //复习列表
+      isAnswerShowing: false, // 卡片背面是否可见
+      is_updating: false,//是否正在更新复习日期
+
+      //所有卡片:
+      all_items: [],
+    },
+    created() {
+      this.init()
+    },
+    computed: {
+      todayRevTabName() {
+        if (this.rev_list.length === 0) {
+          return "今日复习"
+        }
+        return `今日复习(${this.rev_list.length})`
+      },
+      allCardsTabName() {
+        if (this.all_items.length === 0) {
+          return "所有卡片"
+        }
+        return `所有卡片(${this.all_items.length})`
+      }
+    },
+    methods: {
+      async init() {
+
+        const backend = tcb.init({
+          env: "test-4gn3sgio58b74112" //环境ID
+        });
+        //登陆后端
+        await backend.auth().signInAnonymously()
+
+        //查询所有卡片
+        const db = backend.database()
+        const collection = db.collection("items")
+        this.collection = collection
+        const {data} = await collection.get()
+        this.all_items = data
+
+        //过滤今日需要复习内容
+        const now = new Date().getTime()
+        this.rev_list = this.all_items.filter(i => i.next_rev_at < now)
+
+        this.is_loaded = true
+        console.log("卡片总数:", this.all_items.length, "今日复习:", this.rev_list.length)
+      },
+      async addNewCard() {
+        //字段完整性检查
+        if (!this.new_front || !this.new_back) {
+          this.$notify({type: 'warning', message: '字段不足'});
+          return
+        }
+
+        //创建新的条目，规定下次复习日期为1天后
+        const item = {
+          "front": this.new_front,
+          "back": this.new_back,
+          "history": [],
+          "last_rev_at": new Date().getTime() - ONE_DAY_MS,
+          "next_rev_at": new Date().getTime()
+        }
+
+        //存储到数据库
+        this.is_saving = true
+        const result = await this.collection.add(item)
+        item._id = result.id
+        this.all_items.push(item)
+
+        this.$notify({type: 'success', message: '添加成功'});
+
+        //添加到今日复习：
+        this.rev_list.push(item)
+
+        //清空输入内容
+        this.new_front = null
+        this.new_back = null
+        this.is_saving = false
+      },
+
+      async onMark(recall) {
+        const item = this.rev_list[0]
+
+        //计算复习间隔天数
+        const now = new Date().getTime()
+        const real_interval = (now - item.last_rev_at) / ONE_DAY_MS
+
+        //生成复习日志
+        const new_log = [real_interval, recall]
+
+        //更新复习历史
+        item.history.push(new_log)
+        const the_form = {
+          "logs": item.history,
+          "aim_recall": 0.8,
+        }
+
+        //调用遗忘算法API获得下次复习间隔
+        this.is_updating = true
+        const t1 = new Date().getTime()
+        const response = await axios.post("https://srapi.huacishu.com/m1/next_interval", the_form)
+        const interval_day = response.data.interval
+        const time_cost = (new Date().getTime() - t1) / 1000
+        console.log(the_form, "next_interval:", interval_day, "time_cost", time_cost)
+
+        //更新卡片复习信息
+        item.next_rev_at = now + interval_day * ONE_DAY_MS
+        item.last_rev_at = now
+
+        //更新到数据库
+        await this.collection.doc(item._id).update({
+          "history": item.history,
+          "last_rev_at": item.last_rev_at,
+          "next_rev_at": item.next_rev_at
+        })
+        this.$notify({type: 'success', message: '更新成功'});
+        this.is_updating = false
+
+        //切换到下一个卡片
+        this.isAnswerShowing = false
+        this.rev_list.splice(0, 1)
+      },
+      formatYMDHMS(date_ms) {
+        const pattern = 'YYYY-M-D'
+        const date = new Date(date_ms)
+        return moment(date).format(pattern)
+      }
+    }
+  })
+
+</script>
+</body>
+</html>
